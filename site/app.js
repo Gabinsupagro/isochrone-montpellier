@@ -20,7 +20,6 @@ const MODE_LABELS = { tc: "marche + transports en commun", velo: "vélo", voitur
 const DEFAULT_FROM = { lat: 43.60853, lon: 3.8799, label: "Place de la Comédie" };
 const DEFAULT_MAX = 45;
 const MIN_MAX = 5; // borne basse du curseur « Échelle » (doit correspondre au min de #maxRange)
-const ISOCHRONE_OPTIONS = [5, 15, 30, 60]; // cases proposées ; d'autres valeurs s'ajoutent avec « Autre »
 const ISO_MIN = 1;
 const ISO_MAX = 90;
 const DEFAULT_ISOCHRONES = [15, 30];
@@ -31,7 +30,7 @@ const STOP_HOVER_RADIUS = 9; // pixels : distance de survol d'un arrêt
 const CLICK_SLOP = { mouse: 5, touch: 12 };
 const MIN_ZOOM_FACTOR = 0.5;
 const MAX_ZOOM_FACTOR = 14;
-const STOP_LABEL_SCALE = 0.13; // pixels par mètre au-delà desquels on grossit les arrêts de tram et nomme les points r5py
+const STOP_LABEL_SCALE = 0.13; // pixels par mètre au-delà desquels on grossit les arrêts de tram
 const TRAM_NAME_RADIUS = 400; // mètres : en deçà, un lieu est nommé d'après la station de tram proche
 
 // Du plus proche (vert) au plus lointain (rouge) ; au-delà du max : gris.
@@ -82,8 +81,7 @@ const app = {
   maxMinutes: DEFAULT_MAX,
   isochrones: [...DEFAULT_ISOCHRONES],
   heatFrom: "from", // la heatmap part du départ ou de l'arrivée
-  // Mode de déplacement : tc (marche + transports en commun), velo ou voiture. Il vaut pour la carte du site
-  // (calcul simplifié) comme pour les résultats r5py.
+  // Mode de déplacement : tc (marche + transports en commun), velo ou voiture.
   mode: "tc",
   roads: null, // réseau de rues (voiture, vélo), chargé au premier choix de l'un de ces modes
   roadsLoading: null,
@@ -97,19 +95,14 @@ const app = {
   showBasemap: true,
   showNetwork: true, // lignes, arrêts et noms d'arrêts (affichage seulement : le calcul n'en dépend pas)
   heatOpacity: null, // null = valeur automatique selon la présence du fond de carte
-  // Résultats r5py chargés depuis des fichiers locaux : grilles par référence, points, matrice.
-  // grids : clé « référence|mode » (mode tc = marche + transports en commun, voiture, velo) ; refs : une entrée par référence.
-  r5: { grids: new Map(), refs: new Map(), points: [], matrix: new Map(), active: null, grid: null },
   hoverStop: null, // arrêt survolé (indice dans data.stations)
   addresses: null, // index des adresses de la Métropole (géocodage local)
   addressesLoading: null,
   // Données importées par l'utilisateur (lues dans le navigateur, jamais envoyées) et temps calculés :
-  // times : clé « id du point de vente|mode » → minutes du point de vente vers chaque foyer (NaN : inaccessible).
-  // grids : clé « id du point de vente|tc » → minutes vers chaque case de la carte (isochrones transports en commun).
+  // times : clé « id du point de vente|mode » → minutes de chaque foyer vers le point de vente (NaN : inaccessible).
   // live : minutes vers chaque foyer depuis le départ (ou l'arrivée) de la carte affichée, recalculées à chaque calcul.
   // hover, selected : lieu survolé, lieux cliqués (« f3 » : foyers[3], « v2 » : ventes[2]) : seuls ceux-là ont leur étiquette.
-  tool: { foyers: [], ventes: [], report: [], times: new Map(), grids: new Map(), active: null, busy: false, targets: null,
-          fromFoyers: new Map(), // clé « id du point de vente|mode » → minutes de chaque foyer vers lui (récapitulatif des foyers)
+  tool: { foyers: [], ventes: [], report: [], times: new Map(), active: null, busy: false,
           live: null, hover: null, selected: new Set(), focus: null,
           // Calcul porte à porte depuis un foyer choisi (transports en commun) : clé « foyer|points de vente » →
           // { ventes : minutes vers chaque point de vente, grid : minutes vers chaque case de la carte }.
@@ -268,10 +261,6 @@ function prepareGraph(data) {
 
 function walkMinutes(meters) {
   return meters / app.data.meta.walkMetersPerMinute;
-}
-
-function stationUsable(index) {
-  return app.includeBus || app.data.stations[index].tram;
 }
 
 /** Plus courts chemins depuis un point : temps d'arrivée à chaque arrêt + prédécesseurs. */
@@ -567,8 +556,7 @@ function paintHeat(grid, { fast = false } = {}) {
 function contourSegments(grid, threshold) {
   const { cols, rows } = grid;
   const smooth = grid.contour ?? grid.smooth;
-  // Une grille r5py a sa propre emprise ; celle du site, l'emprise des données.
-  const [minX, minY, maxX, maxY] = grid.bounds ?? app.data.meta.bounds;
+  const [minX, minY, maxX, maxY] = app.data.meta.bounds;
   const cellW = (maxX - minX) / cols;
   const cellH = (maxY - minY) / rows;
   const value = (row, col) => {
@@ -935,7 +923,7 @@ function render() {
   }
 
   if (app.grid) {
-    const [minX, minY, maxX, maxY] = app.grid.bounds ?? app.data.meta.bounds;
+    const [minX, minY, maxX, maxY] = app.data.meta.bounds;
     const [ox, oy] = app.offset;
     ctx.save();
     ctx.clip(app.paths.land, "evenodd");
@@ -998,7 +986,6 @@ function render() {
   useScreenTransform();
   // Avec les noms du fond de carte, ceux des communes feraient doublon.
   if (!(tilesShown && app.basemap.hasLabels)) drawCommuneNames();
-  drawR5Points();
   drawFoyers();
   drawVentes();
   drawStops();
@@ -1007,13 +994,6 @@ function render() {
     if (app.roadSolution) {
       const road = roadMinutesTo(app.to.point);
       minutes = road === null ? "—" : formatMinutes(road);
-    } else if (toolTransitShown()) {
-      const transit = toolArrivalMinutes();
-      minutes = transit === null ? "—" : formatMinutes(transit);
-    }
-    if (app.r5.active) {
-      const r5 = r5TimeAt(app.to.point);
-      minutes = r5 === null ? "> max" : formatMinutes(r5);
     }
     drawMarker(app.to.point, COLORS.to, app.heatFrom === "to" ? `Arrivée · ${minutes}` : minutes);
   }
@@ -1085,15 +1065,8 @@ function heatSource() {
 function recompute({ fast = false } = {}) {
   app.heatVersion += 1;
   app.heatRoad = null;
-  if (app.r5.active) {
-    // La carte vient de la grille r5py de la référence : rien à recalculer.
-    app.grid = app.r5.grid;
-    if (app.grid) paintHeat(app.grid, { fast });
-    updatePanel();
-    requestRender();
-    return;
-  }
   if (!app.from) return;
+  const vente = activeVente();
   const focus = focusTransitCalc();
   if (focus) {
     // Foyer choisi, transports en commun : isochrones du calcul porte à porte depuis lui (celui de la liste).
@@ -1106,7 +1079,7 @@ function recompute({ fast = false } = {}) {
     requestRender();
     return;
   }
-  if (app.tool.focus !== null && app.mode === "tc" && !app.r5.active && heatSource() === app.from) {
+  if (app.tool.focus !== null && app.mode === "tc" && heatSource() === app.from) {
     // Foyer choisi, calcul porte à porte pas encore fait : carte vide en attendant (pas d'isochrones d'un autre calcul).
     app.solution = solveFrom(app.from.point);
     app.heatSolution = null;
@@ -1117,15 +1090,13 @@ function recompute({ fast = false } = {}) {
     if (!fast) ensureFocusCalc();
     return;
   }
-  const toolGrid =
-    app.tool.active && app.mode === "tc" && heatSource() === app.from ? app.tool.grids.get(`${app.tool.active}|tc`) : null;
-  if (toolGrid) {
-    // Point de vente choisi, transports en commun : isochrones du calcul porte à porte (celui des comptes).
-    app.solution = solveFrom(app.from.point);
-    app.heatSolution = app.solution;
+  if (vente && app.mode === "tc") {
+    // Point de vente choisi, transports en commun : pas d'isochrone autour de lui (les trajets se calculent du foyer
+    // vers le point de vente) ; les foyers sont colorés d'après leur trajet, le panneau les compte.
+    app.solution = null;
+    app.heatSolution = null;
     app.roadSolution = null;
-    app.grid = roadGrid(toolGrid, { floored: true });
-    paintHeat(app.grid, { fast });
+    app.grid = null;
     updatePanel();
     requestRender();
     return;
@@ -1138,9 +1109,13 @@ function recompute({ fast = false } = {}) {
     const options = { maxMinutes: ROAD_LIMIT_MINUTES };
     app.solution = null;
     app.heatSolution = null;
-    app.roadSolution = app.roads.solve(app.mode, app.from.point, options);
-    // Carte depuis l'arrivée : temps de chaque lieu vers l'arrivée (sens uniques pris à rebours).
-    const heat = heatSource() === app.from ? app.roadSolution : app.roads.solve(app.mode, app.to.point, { ...options, reverse: true });
+    // Point de vente choisi, ou carte depuis l'arrivée : temps de chaque lieu vers ce point (sens uniques pris à rebours).
+    app.roadSolution = vente ? null : app.roads.solve(app.mode, app.from.point, options);
+    const heat = vente
+      ? app.roads.solve(app.mode, app.from.point, { ...options, reverse: true })
+      : heatSource() === app.from
+        ? app.roadSolution
+        : app.roads.solve(app.mode, app.to.point, { ...options, reverse: true });
     app.heatRoad = heat;
     app.grid = roadGrid(app.roads.cellMinutes(heat));
     paintHeat(app.grid, { fast });
@@ -1159,8 +1134,7 @@ function recompute({ fast = false } = {}) {
 
 function setFrom(point, label = null, { quiet = false, fast = false } = {}) {
   if (!isOnLand(point)) return false;
-  // Déplacer le départ quitte les résultats r5py et le point de vente choisi, calculés pour eux seulement.
-  if (app.r5.active) leaveR5();
+  // Déplacer le départ quitte le point de vente choisi.
   if (app.tool.active) leaveTool();
   app.tool.focus = null; // départ déplacé : il n'est plus sur le foyer choisi
   app.from = { point, label: label || describePlace(point) };
@@ -1171,6 +1145,7 @@ function setFrom(point, label = null, { quiet = false, fast = false } = {}) {
 
 function setTo(point, label = null, { quiet = false, fast = false } = {}) {
   if (!isOnLand(point)) return false;
+  if (app.tool.active) return false; // les trajets d'un point de vente se lisent vers lui : pas d'arrivée à poser
   app.to = { point, label: label || describePlace(point) };
   if (app.heatFrom === "to") {
     recompute({ fast });
@@ -1189,8 +1164,7 @@ function removeTo() {
 }
 
 function setHeatFrom(source) {
-  // En mode r5py, la carte part toujours de la référence (pas de grille r5py depuis un point quelconque).
-  app.heatFrom = source === "to" && app.to && !app.r5.active ? "to" : "from";
+  app.heatFrom = source === "to" && app.to ? "to" : "from";
   for (const button of $("heatFrom").querySelectorAll("button")) {
     button.setAttribute("aria-pressed", String(button.dataset.source === app.heatFrom));
   }
@@ -1198,36 +1172,25 @@ function setHeatFrom(source) {
 }
 
 function updatePanel() {
+  fillPanel();
+  // Point de vente choisi : c'est l'arrivée des trajets, il n'y a pas d'autre arrivée à poser.
+  const vente = activeVente();
+  $("tripFromLabel").textContent = vente ? "Point de vente" : "Départ";
+  if (vente) $("tripHint").hidden = true;
+}
+
+function fillPanel() {
   $("tripFrom").textContent = app.from?.label ?? "—";
   updateLegendInfo();
   const foyersShown = app.tool.foyers.length > 0 || Boolean(app.tool.active);
-  $("r5Info").hidden = !app.r5.active && !foyersShown;
-  if (foyersShown && !app.r5.active) updateToolPanel(); // comptes de foyers, sous l'itinéraire habituel
-  if (app.r5.active) {
-    updateR5Panel();
-    return;
-  }
+  $("r5Info").hidden = !foyersShown;
+  if (foyersShown) updateToolPanel(); // comptes de foyers, sous l'itinéraire habituel
   if (app.mode !== "tc") {
     updateRoadPanel();
     return;
   }
   const result = $("tripResult");
-  if (app.to && toolTransitShown()) {
-    // Même calcul que les comptes et les isochrones : porte à porte, médiane des départs de 7 h à 20 h.
-    const minutes = toolArrivalMinutes();
-    result.hidden = false;
-    $("tripHint").hidden = true;
-    $("tripTo").textContent = app.to.label;
-    $("tripDuration").textContent = minutes === null ? "Inaccessible" : formatMinutes(minutes);
-    const item = document.createElement("li");
-    const badge = document.createElement("span");
-    badge.className = "badge walk";
-    badge.textContent = "🚶";
-    const text = document.createElement("span");
-    text.textContent = "Marche par les rues et transports en commun : temps médian pour des départs de 7 h à 20 h.";
-    item.append(badge, text);
-    $("tripSteps").replaceChildren(item);
-  } else if (!app.to || !app.solution) {
+  if (!app.to || !app.solution) {
     result.hidden = true;
     $("tripHint").hidden = false;
   } else {
@@ -1306,29 +1269,38 @@ function legendDescription() {
   const focus = app.tool.focus !== null ? app.tool.foyers[app.tool.focus] : null;
   const fromArrival = heatSource() !== app.from; // carte « depuis l'arrivée »
   const mode = MODE_LABELS[app.mode];
-  const origin = fromArrival
-    ? "de l'arrivée"
-    : vente
-      ? `du point de vente ${vente.id}`
-      : focus
-        ? `du foyer ${focus.id}`
-        : "du départ";
-  // Destinations : les foyers depuis un point de vente, les points de vente depuis un foyer, sinon n'importe quel lieu.
-  const target = fromArrival ? "chaque lieu" : vente ? "chaque foyer" : focus ? "chaque point de vente" : "chaque lieu";
-  if (app.mode === "tc") {
-    const exact = !fromArrival && (vente || focus) && (vente ? Boolean(app.tool.grids.get(`${vente.id}|tc`)) : Boolean(focusTransitCalc()));
+  const doorToDoor =
+    "Calcul porte à porte (méthode de r5py) : marche par les rues, horaires TaM, médiane des départs de 7 h à 20 h, " +
+    "attente comprise. Le sens compte : l'aller et le retour peuvent différer d'une ou deux minutes.";
+  // Les trajets de l'outil vont toujours d'un foyer vers un point de vente.
+  if (vente) {
+    return app.mode === "tc"
+      ? {
+          title: `Temps en ${mode}, de chaque foyer vers le point de vente ${vente.id}`,
+          note: `${doorToDoor} Pas d'isochrone autour d'un point de vente en transports en commun : chaque foyer est coloré ` +
+            "d'après son propre trajet vers lui.",
+        }
+      : {
+          title: `Temps en ${mode}, de chaque lieu vers le point de vente ${vente.id}`,
+          note: "Chaque lieu est pris comme départ vers le point de vente : sens uniques pris à rebours.",
+        };
+  }
+  if (focus) {
     return {
-      title: `Temps en ${mode}, ${origin} vers ${target}`,
-      note: exact
-        ? "Calcul porte à porte (méthode de r5py) : marche par les rues, horaires TaM, médiane des départs de 7 h à 20 h, " +
-          "attente comprise. Le sens compte : l'aller et le retour peuvent différer d'une ou deux minutes."
-        : "Calcul rapide : attente égale à la moitié de l'intervalle entre deux passages, marche à vol d'oiseau jusqu'aux arrêts. " +
-          (fromArrival ? "Carte calculée dans le sens arrivée → lieux, comme depuis un départ." : "Sens départ → lieux."),
+      title: `Temps en ${mode}, du foyer ${focus.id} vers chaque point de vente`,
+      note: app.mode === "tc" ? doorToDoor : "",
     };
   }
-  const road = ROAD_MODES[app.mode];
+  if (app.mode === "tc") {
+    return {
+      title: `Temps en ${mode}, ${fromArrival ? "de l'arrivée" : "du départ"} vers chaque lieu`,
+      note:
+        "Calcul rapide : attente égale à la moitié de l'intervalle entre deux passages, marche à vol d'oiseau jusqu'aux arrêts. " +
+        (fromArrival ? "Carte calculée dans le sens arrivée → lieux, comme depuis un départ." : "Sens départ → lieux."),
+    };
+  }
   return {
-    title: fromArrival ? `Temps en ${mode}, de chaque lieu vers l'arrivée` : `Temps en ${mode}, ${origin} vers ${target}`,
+    title: fromArrival ? `Temps en ${mode}, de chaque lieu vers l'arrivée` : `Temps en ${mode}, du départ vers chaque lieu`,
     note: fromArrival ? "Chaque lieu est pris comme départ vers l'arrivée : sens uniques pris à rebours." : "",
   };
 }
@@ -1383,7 +1355,7 @@ function updateLegendInfo() {
   const focus = app.tool.focus !== null;
   keys.push(
     vente
-      ? legendKey(legendShape("square", COLORS.from, "#fff"), `Point de vente choisi : ${vente.id} (départ de la carte)`)
+      ? legendKey(legendShape("square", COLORS.from, "#fff"), `Point de vente choisi : ${vente.id} (arrivée des trajets)`)
       : focus
         ? legendKey(legendShape("circle", COLORS.from, "#fff"), `Foyer choisi : ${app.tool.foyers[app.tool.focus].id} (départ de la carte)`)
         : legendKey(legendShape("circle", COLORS.from, "#fff"), "Départ (glissez-le pour le déplacer)"),
@@ -1425,10 +1397,9 @@ function parsePair(value) {
 
 function syncUrl() {
   const params = new URLSearchParams();
-  // Résultats r5py : les adresses (confidentielles) restent hors de l'URL et de l'historique.
-  // Foyer choisi : sa position (confidentielle) reste aussi hors de l'URL.
-  if (app.from && !app.r5.active && app.tool.focus === null) params.set("from", formatPair(app.from.point));
-  if (app.to && !app.r5.active) params.set("to", formatPair(app.to.point));
+  // Foyer choisi : sa position (confidentielle) reste hors de l'URL et de l'historique.
+  if (app.from && app.tool.focus === null) params.set("from", formatPair(app.from.point));
+  if (app.to) params.set("to", formatPair(app.to.point));
   if (app.to && app.heatFrom === "to") params.set("carte", "arrivee");
   if (app.mode !== "tc") params.set("mode", app.mode);
   if (!app.includeBus) params.set("bus", "0");
@@ -1617,7 +1588,11 @@ function endPointer(event) {
       }
       return;
     }
-    if (!setTo(unproject(...eventPoint(event)))) toast("Ce point est hors de la Métropole ou sur l'eau.");
+    if (app.tool.active) {
+      toast("Un point de vente est choisi : ses trajets se lisent vers lui. Déplacez le carré vert ou choisissez un autre départ.", 5000);
+    } else if (!setTo(unproject(...eventPoint(event)))) {
+      toast("Ce point est hors de la Métropole ou sur l'eau.");
+    }
   } else if (drag.kind === "marker" && !drag.moved) {
     // Clic sur le départ posé sur un foyer choisi : on quitte ce foyer (le départ reste à sa place).
     if (drag.marker === "from" && app.tool.focus !== null) {
@@ -1647,8 +1622,7 @@ canvas.addEventListener(
   { passive: false },
 );
 
-// --- Résultats r5py (fichiers locaux) -------------------------------------------
-// Les fichiers du dossier sortie/ de r5_isochrones.py sont lus par le navigateur (FileReader) : rien n'est envoyé.
+// --- Lecture des fichiers CSV ------------------------------------------------------
 
 /** CSV écrit par pandas (séparateur « ; » ou « , », champs entre guillemets possibles) → objets. */
 function parseCsv(text) {
@@ -1686,153 +1660,7 @@ function parseCsv(text) {
     .map((values) => Object.fromEntries(header.map((name, i) => [name, (values[i] ?? "").trim()])));
 }
 
-/** Grille r5py → grille de la carte (mêmes champs que computeGrid, plus son emprise). */
-function r5Grid(raw) {
-  const { colonnes: cols, rangs: rows, pas, origine } = raw;
-  const times = Float32Array.from(raw.minutes, (value) => (value < 0 ? NaN : value));
-  // Même enjambement des étangs que la carte (WATER_BRIDGE_CELLS cases de 200 m), à l'échelle de la grille r5py.
-  const passes = Math.max(1, Math.round((WATER_BRIDGE_CELLS * 200) / pas));
-  const bridged = fillGaps(times, cols, rows, passes);
-  return {
-    times,
-    smooth: smoothGrid(bridged, cols, rows),
-    cols,
-    rows,
-    contours: {},
-    bounds: [origine[0], origine[1], origine[0] + cols * pas, origine[1] + rows * pas],
-  };
-}
-
-const R5_MODES = { tc: "Marche + transports en commun", voiture: "Voiture", velo: "Vélo" };
-
-/** Grille de la référence active dans le mode choisi (absente en voiture pour une référence sans parking). */
-function r5CurrentGrid() {
-  return app.r5.grids.get(`${app.r5.active}|${app.mode}`) ?? null;
-}
-
-/** Temps r5py (minutes) de la référence active vers un point, d'après sa grille ; null hors grille ou inaccessible. */
-function r5TimeAt(point) {
-  const raw = r5CurrentGrid();
-  if (!raw) return null;
-  const col = Math.floor((point[0] - raw.origine[0]) / raw.pas);
-  const row = Math.floor((point[1] - raw.origine[1]) / raw.pas);
-  if (col < 0 || row < 0 || col >= raw.colonnes || row >= raw.rangs) return null;
-  const value = raw.minutes[row * raw.colonnes + col];
-  return value < 0 ? null : value;
-}
-
-/** Temps vers un point de la base : la matrice si elle est chargée (temps exact au point), sinon la grille. */
-function r5PointTime(point) {
-  if (!r5CurrentGrid()) return null;
-  const key = `${app.r5.active}|${app.mode}|${point.id}`;
-  if (app.r5.matrix.has(key)) return app.r5.matrix.get(key);
-  return r5TimeAt(point.point);
-}
-
-/** Recalcule la grille affichée pour la référence et le mode choisis (aucune en voiture sans parking). */
-function refreshR5Grid() {
-  const raw = r5CurrentGrid();
-  app.r5.grid = raw ? r5Grid(raw) : null;
-}
-
-function leaveR5() {
-  app.r5.active = null;
-  app.r5.grid = null;
-}
-
-function updateR5Panel() {
-  const raw = r5CurrentGrid();
-  $("tripResult").hidden = true;
-  $("tripHint").hidden = true;
-  const parts = [];
-  const line = (text, className) => {
-    const p = document.createElement("p");
-    p.textContent = text;
-    if (className) p.className = className;
-    parts.push(p);
-  };
-  line(R5_MODES[app.mode], "trip-eyebrow");
-  if (!raw) {
-    line(
-      app.mode === "voiture"
-        ? "Pas de calcul en voiture pour cette référence : elle n'a pas de parking (colonne parking de references.csv)."
-        : `Pas de calcul « ${R5_MODES[app.mode]} » pour cette référence dans les fichiers chargés (relancer r5_isochrones.py).`,
-      "r5-source",
-    );
-    $("r5Info").replaceChildren(...parts);
-    return;
-  }
-  if (app.mode === "voiture") {
-    line(`Temps en voiture, circulation fluide, + ${raw.voitureExtremites ?? 0} min pour rejoindre sa voiture, se garer et marcher.`, "r5-source");
-  } else if (app.mode === "velo") {
-    const stress = raw.stressVelo ? `, rues de stress ≤ ${raw.stressVelo} (sinon vélo poussé à pied)` : "";
-    line(`Temps à vélo, ${raw.vitesseVelo ?? 12} km/h${stress}, + ${raw.veloExtremites ?? 0} min pour sortir, garer son vélo et marcher.`, "r5-source");
-  } else {
-    line(`Temps porte à porte r5py, le ${raw.jour.slice(6)}/${raw.jour.slice(4, 6)}, départs ${raw.plage}.`, "r5-source");
-  }
-  if (app.to) {
-    const minutes = r5TimeAt(app.to.point);
-    line("Point cliqué", "trip-eyebrow");
-    line(minutes === null ? "Inaccessible" : formatMinutes(minutes), "r5-time");
-  } else {
-    line("Cliquez sur la carte pour lire un temps.", "trip-hint");
-  }
-  const points = app.r5.points;
-  if (points.length) {
-    const thresholds = app.isochrones.length ? [...app.isochrones].sort((a, b) => a - b) : [app.maxMinutes];
-    const times = points.map(r5PointTime);
-    const list = document.createElement("ul");
-    list.className = "r5-counts";
-    for (const threshold of thresholds) {
-      const inside = points.filter((_, i) => times[i] !== null && times[i] <= threshold);
-      const count = inside.length;
-      const item = document.createElement("li");
-      const label = document.createElement("span");
-      label.textContent = `≤ ${threshold} min`;
-      const value = document.createElement("strong");
-      value.textContent = `${count} / ${points.length} foyers`;
-      if (points.some((point) => point.personnes !== null)) {
-        const sum = (list) => list.reduce((total, point) => total + (point.personnes ?? 0), 0);
-        const format = (x) => x.toLocaleString("fr-FR", { maximumFractionDigits: 1 });
-        value.textContent += ` · ${format(sum(inside))} / ${format(sum(points))} personnes`;
-      }
-      item.append(label, value);
-      list.append(item);
-    }
-    line("Foyers dans l'isochrone", "trip-eyebrow");
-    parts.push(list);
-    const exact = points.every((point) => app.r5.matrix.has(`${app.r5.active}|${app.mode}|${point.id}`));
-    line(exact ? "D'après matrice.csv (temps exacts aux adresses)." : "D'après la grille (chargez matrice.csv pour les temps exacts).", "r5-source");
-  } else {
-    line("Chargez geocodage.csv pour afficher et compter les foyers.", "r5-source");
-  }
-  $("r5Info").replaceChildren(...parts);
-}
-
-function drawR5Points() {
-  if (!app.r5.active || !app.r5.points.length) return;
-  const labels = app.view.scale > STOP_LABEL_SCALE;
-  for (const point of app.r5.points) {
-    const [x, y] = project(point.point);
-    if (x < -20 || y < -20 || x > app.size.width + 20 || y > app.size.height + 20) continue;
-    const time = r5PointTime(point);
-    const inside = time !== null && time <= app.maxMinutes;
-    const [r, g, b] = inside ? paletteColor(time / app.maxMinutes) : [150, 150, 150];
-    ctx.beginPath();
-    ctx.arc(x, y, 5.5, 0, Math.PI * 2);
-    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "#111";
-    ctx.stroke();
-    if (labels) {
-      ctx.textAlign = "left";
-      ctx.textBaseline = "middle";
-      const text = time === null ? point.id : `${point.id} · ${formatMinutes(time)}`;
-      drawHaloText(text, x + 9, y, { font: "600 11px Inter, sans-serif", color: "#111" });
-    }
-  }
-}
+const MODE_TITLES = { tc: "Marche + transports en commun", voiture: "Voiture", velo: "Vélo" };
 
 const networkDefault = (mode) => mode === "tc";
 
@@ -1851,7 +1679,6 @@ $("modeSelect").addEventListener("change", (event) => {
   app.showNetwork = networkDefault(app.mode);
   $("networkToggle").checked = app.showNetwork;
   app.hoverStop = null;
-  if (app.r5.active) refreshR5Grid();
   recompute();
   noParkingNotice();
   syncUrl();
@@ -1880,7 +1707,7 @@ $("busToggle").addEventListener("change", (event) => {
 
 function isochronesChanged() {
   app.isochrones = [...$("isoToggles").querySelectorAll("input[type=checkbox]:checked")].map((input) => Number(input.value));
-  if (app.r5.active || app.tool.active || app.tool.foyers.length) updatePanel(); // comptes de foyers par isochrone
+  if (app.tool.active || app.tool.foyers.length) updatePanel(); // comptes de foyers par isochrone
   requestRender();
   syncUrl();
 }
@@ -1936,7 +1763,6 @@ $("maxRange").addEventListener("input", (event) => {
   app.maxMinutes = Number(event.target.value);
   updateLegend();
   if (app.grid) paintHeat(app.grid);
-  if (app.r5.active) updatePanel();
   requestRender();
   syncUrl();
 });
@@ -2003,7 +1829,7 @@ async function readText(file) {
   }
 }
 
-// Noms de colonnes acceptés (minuscules), comme r5_isochrones.py.
+// Noms de colonnes acceptés (minuscules).
 const TOOL_COLUMNS = {
   id: ["id", "name", "nom", "identifiant"],
   adresse: ["adresse", "adresses", "address", "result_label", "label"],
@@ -2085,112 +1911,21 @@ const toolDb = (() => {
 
 const toolModes = (vente) => (vente.parking ? ["tc", "velo", "voiture"] : ["tc", "velo"]);
 const nextFrame = () => new Promise((resolve) => setTimeout(resolve, 0));
-// Temps du foyer vers le point de vente (récapitulatif des foyers) : clés à part dans la mémoire du navigateur.
+// Clés de la mémoire du navigateur : « modèle|foyer-vers-vente|mode|point de vente » → { position du foyer: minutes }.
 const TOOL_DIRECTION = "foyer-vers-vente";
 const roundMinutes = (minutes) => (Number.isFinite(minutes) && minutes <= TOOL_MAX_MINUTES ? Math.round(minutes * 10) / 10 : null);
 
-/** Minutes du point de vente vers chaque foyer, dans un mode (NaN : inaccessible ou au-delà de 90 min). */
-function computeTimes(vente, mode, foyers) {
-  const out = new Float32Array(foyers.length).fill(NaN);
-  if (mode === "tc") {
-    // Toutes les destinations préparées d'un coup (foyers puis cases de la carte) : un seul calcul par point de vente.
-    const all = app.transit.solve(vente.point, app.tool.targets);
-    const index = new Map(app.tool.foyers.map((foyer, i) => [foyer.key, i]));
-    foyers.forEach((foyer, i) => {
-      out[i] = all[index.get(foyer.key)];
-    });
-    app.tool.grids.set(`${vente.id}|tc`, all.slice(app.tool.foyers.length));
-  } else {
-    const solution = app.roads.solve(mode, vente.point, { maxMinutes: TOOL_MAX_MINUTES + 5 });
-    foyers.forEach((foyer, i) => {
-      out[i] = app.roads.minutesTo(solution, foyer.point) ?? NaN;
-    });
-  }
-  return out.map((minutes) => (minutes <= TOOL_MAX_MINUTES ? minutes : NaN));
-}
-
-
 /**
- * Sens point de vente → foyers (comptes du panneau, isochrones, récapitulatif des points de vente) : un calcul par
- * point de vente et par mode. Calcule ce qui manque, en reprenant la mémoire du navigateur.
+ * Temps de chaque foyer vers chaque point de vente (comptes du panneau, couleur des foyers, récapitulatif) : toujours
+ * dans le sens foyer → point de vente. Calcule ce qui manque, en reprenant la mémoire du navigateur.
+ * - vélo, voiture : un calcul à rebours depuis chaque point de vente (sens uniques pris à contresens) ;
+ * - transports en commun : un calcul porte à porte par foyer, vers tous les points de vente à calculer (horaires TaM,
+ *   médiane des départs du foyer de 7 h à 20 h) : c'est la partie longue.
+ * `only` : ne calculer que ces points de vente (point de vente ajouté à la main). Renvoie true si tout est calculé.
  */
 async function runTool({ only = null } = {}) {
   const { foyers } = app.tool;
   const ventes = only ?? app.tool.ventes;
-  if (!foyers.length || !ventes.length || app.tool.busy) return;
-  app.tool.busy = true;
-  try {
-    await ensureRoads();
-    if (!app.transit) {
-      toast("Chargement des horaires…", 30000);
-      await nextFrame();
-      app.transit = await loadTransit(HORAIRES_URL, app.roads.walk);
-    }
-    if (!app.tool.targets) {
-      toast("Préparation des trajets à pied vers les foyers…", 30000);
-      await nextFrame();
-      app.tool.targets = app.transit.prepareTargets([...foyers.map((foyer) => foyer.point), ...app.data.cells.map((cell) => cell.point)]);
-    }
-    const jobs = ventes.flatMap((vente) => toolModes(vente).map((mode) => [vente, mode]));
-    let reused = 0;
-    let computed = 0;
-    for (const [n, [vente, mode]] of jobs.entries()) {
-      const key = `${TOOL_MODEL}|${mode}|${vente.key}`;
-      const saved = (await toolDb.get(key).catch(() => null)) ?? {};
-      const gridKey = `${TOOL_MODEL}|grille|${vente.key}`;
-      if (mode === "tc" && !app.tool.grids.has(`${vente.id}|tc`)) {
-        const grid = await toolDb.get(gridKey).catch(() => null);
-        if (grid) app.tool.grids.set(`${vente.id}|tc`, Float32Array.from(grid, (value) => value ?? NaN));
-      }
-      // En transports en commun, la grille de la carte se calcule avec les foyers : refaite si elle manque.
-      const missing = mode === "tc" && !app.tool.grids.has(`${vente.id}|tc`) ? foyers : foyers.filter((foyer) => !(foyer.key in saved));
-      if (missing.length) {
-        toast(`Calcul ${n + 1} / ${jobs.length} : ${vente.id}, ${MODE_LABELS[mode]}…`, 60000);
-        await nextFrame();
-        const minutes = computeTimes(vente, mode, missing);
-        missing.forEach((foyer, i) => {
-          saved[foyer.key] = Number.isNaN(minutes[i]) ? null : Math.round(minutes[i] * 10) / 10;
-        });
-        await toolDb.put(key, saved).catch((error) => console.warn("Mémoire du navigateur indisponible", error));
-        if (mode === "tc") {
-          const grid = Array.from(app.tool.grids.get(`${vente.id}|tc`), (value) => (Number.isNaN(value) ? null : value));
-          await toolDb.put(gridKey, grid).catch(() => {});
-        }
-        computed += missing.length;
-      }
-      reused += foyers.length - missing.length;
-      app.tool.times.set(
-        `${vente.id}|${mode}`,
-        Float32Array.from(foyers, (foyer) => saved[foyer.key] ?? NaN),
-      );
-    }
-    toast(
-      computed
-        ? `Calculs terminés : ${computed} temps calculés, ${reused} repris de la mémoire du navigateur.`
-        : `Tous les temps (${reused}) étaient déjà en mémoire.`,
-      5000,
-    );
-  } catch (error) {
-    console.error(error);
-    toast(`Calcul impossible : ${error.message}`, 8000);
-  } finally {
-    app.tool.busy = false;
-    fillVenteSelect();
-    updatePanel();
-    requestRender();
-    if (app.tool.focus !== null && app.mode === "tc") ensureFocusCalc(); // attendait la fin de ce calcul
-  }
-}
-
-/**
- * Sens foyer → points de vente (récapitulatif des foyers), calculé à la demande ; ce qui est fait reste en mémoire :
- * - vélo, voiture : un calcul à rebours depuis chaque point de vente (sens uniques pris à contresens) ;
- * - transports en commun : un calcul porte à porte par foyer, vers tous les points de vente (horaires TaM,
- *   médiane des départs du foyer de 7 h à 20 h) : c'est la partie longue.
- * Renvoie true si tout est calculé.
- */
-async function runFoyerTool() {
-  const { foyers, ventes } = app.tool;
   if (!foyers.length || !ventes.length) return false;
   if (app.tool.busy) {
     toast("Un calcul est déjà en cours : réessayez dans un instant.", 5000);
@@ -2217,7 +1952,7 @@ async function runFoyerTool() {
     let reused = 0;
     let computed = 0;
 
-    // 2. Vélo, voiture : calcul à rebours depuis le point de vente (temps de chaque lieu vers lui).
+    // Vélo, voiture : calcul à rebours depuis le point de vente (temps de chaque lieu vers lui).
     for (const vente of ventes) {
       for (const mode of toolModes(vente).filter((item) => item !== "tc")) {
         const dict = saved.get(`${vente.id}|${mode}`);
@@ -2234,25 +1969,25 @@ async function runFoyerTool() {
       }
     }
 
-    // 3. Transports en commun : un calcul par foyer (lieu), vers tous les points de vente à la fois.
-    const dicts = ventes.map((vente) => saved.get(`${vente.id}|tc`));
+    // Transports en commun : un calcul par foyer (lieu), vers les points de vente dont il manque des temps.
+    const pending = ventes.filter((vente) => foyers.some((foyer) => !(foyer.key in saved.get(`${vente.id}|tc`))));
     const places = [...new Map(foyers.map((foyer) => [foyer.key, foyer])).values()];
-    const todo = places.filter((foyer) => dicts.some((dict) => !(foyer.key in dict)));
-    reused += foyers.length - foyers.filter((foyer) => dicts.some((dict) => !(foyer.key in dict))).length;
+    const todo = places.filter((foyer) => pending.some((vente) => !(foyer.key in saved.get(`${vente.id}|tc`))));
+    reused += foyers.filter((foyer) => !todo.some((place) => place.key === foyer.key)).length;
     if (todo.length) {
-      const targets = app.transit.prepareTargets(ventes.map((vente) => vente.point));
+      const targets = app.transit.prepareTargets(pending.map((vente) => vente.point));
       const started = performance.now();
       let lastSave = started;
       for (const [n, foyer] of todo.entries()) {
         const minutes = app.transit.solve(foyer.point, targets);
-        dicts.forEach((dict, j) => {
-          dict[foyer.key] = roundMinutes(minutes[j]);
+        pending.forEach((vente, j) => {
+          saved.get(`${vente.id}|tc`)[foyer.key] = roundMinutes(minutes[j]);
         });
         computed += foyers.filter((item) => item.key === foyer.key).length;
         const now = performance.now();
         if (now - lastSave > 3000 || n === todo.length - 1) {
           // Enregistré au fil de l'eau : un calcul interrompu reprend où il s'était arrêté.
-          await Promise.all(ventes.map((vente) => store(vente, "tc")));
+          await Promise.all(pending.map((vente) => store(vente, "tc")));
           lastSave = now;
           const left = ((now - started) / (n + 1)) * (todo.length - n - 1);
           toast(
@@ -2268,13 +2003,13 @@ async function runFoyerTool() {
     for (const vente of ventes) {
       for (const mode of toolModes(vente)) {
         const dict = saved.get(`${vente.id}|${mode}`);
-        app.tool.fromFoyers.set(`${vente.id}|${mode}`, Float32Array.from(foyers, (foyer) => dict[foyer.key] ?? NaN));
+        app.tool.times.set(`${vente.id}|${mode}`, Float32Array.from(foyers, (foyer) => dict[foyer.key] ?? NaN));
       }
     }
     toast(
       computed
-        ? `Calculs depuis les foyers terminés : ${computed} temps calculés, ${reused} repris de la mémoire du navigateur.`
-        : `Tous les temps depuis les foyers (${reused}) étaient déjà en mémoire.`,
+        ? `Calculs terminés : ${computed} temps calculés, ${reused} repris de la mémoire du navigateur.`
+        : `Tous les temps (${reused}) étaient déjà en mémoire.`,
       5000,
     );
     done = true;
@@ -2283,6 +2018,9 @@ async function runFoyerTool() {
     toast(`Calcul impossible : ${error.message}`, 8000);
   } finally {
     app.tool.busy = false;
+    fillVenteSelect();
+    updatePanel();
+    requestRender();
     if (app.tool.focus !== null && app.mode === "tc") ensureFocusCalc(); // attendait la fin de ce calcul
   }
   return done;
@@ -2299,21 +2037,18 @@ async function importPlaces(file, kind) {
     app.tool[kind] = [...places, ...manual];
     if (kind === "foyers") {
       app.tool.live = null;
-      app.tool.targets = null;
       app.tool.focus = null;
     }
     // Les indices changent : étiquettes affichées de ce fichier retirées.
     const prefix = kind === "foyers" ? "f" : "v";
     app.tool.hover = null;
     for (const key of [...app.tool.selected]) if (key.startsWith(prefix)) app.tool.selected.delete(key);
-    app.tool.grids.clear();
     const label = kind === "foyers" ? "foyers" : "points de vente";
     app.tool.report = [
       ...app.tool.report.filter((row) => row.fichier !== (kind === "foyers" ? "foyer" : "point de vente")),
       ...report,
     ];
     app.tool.times.clear();
-    app.tool.fromFoyers.clear();
     app.tool.active = null;
     const missing = report.length - places.length;
     const placed = `${places.length} ${label} placés${missing ? `, ${missing} non trouvés (voir « Contrôle des adresses »)` : ""}.`;
@@ -2343,7 +2078,7 @@ function uniqueVenteId(name, taken = new Set(app.tool.ventes.map((vente) => vent
 
 /**
  * Point de vente saisi à la main : géocodé dans la page (adresse, ou « latitude, longitude »), ajouté à la liste,
- * puis calculé seul (marche + TC, vélo, voiture s'il a un parking) et affiché avec ses isochrones.
+ * puis calculé seul (transports en commun, vélo, voiture s'il a un parking) et affiché.
  */
 async function addVente(name, address, parking) {
   if (app.tool.busy) {
@@ -2371,12 +2106,11 @@ async function addVente(name, address, parking) {
   app.tool.ventes.push(vente);
   app.tool.report.push({ fichier: "point de vente", id, adresse: address, qualite: `${found.qualite} (saisi à la main)`, trouve: found.trouve });
   fillVenteSelect();
-  activateVente(id); // isochrones de la carte tout de suite, depuis le point de vente
+  activateVente(id);
   if (app.tool.foyers.length) {
-    await runTool({ only: [vente] });
-    if (app.tool.active === id) recompute(); // isochrones et comptes du calcul porte à porte
+    await runTool({ only: [vente] }); // le panneau se met à jour à la fin du calcul
   } else {
-    toast(`${id} ajouté${found.trouve ? ` (${found.trouve})` : ""}. Importez des foyers pour les compter dans ses isochrones.`, 7000);
+    toast(`${id} ajouté${found.trouve ? ` (${found.trouve})` : ""}. Importez des foyers pour les compter.`, 7000);
   }
   return true;
 }
@@ -2384,7 +2118,6 @@ async function addVente(name, address, parking) {
 function fillVenteSelect() {
   const select = $("venteSelect");
   const ready = app.tool.ventes.length && app.tool.foyers.length && app.tool.times.size;
-  // Sans foyers, un point de vente se choisit quand même (isochrones seules).
   select.replaceChildren(
     new Option("Choisir un point de vente…", ""),
     ...app.tool.ventes.map((vente) => new Option(vente.parking ? `${vente.id} · parking` : vente.id, vente.id)),
@@ -2392,14 +2125,12 @@ function fillVenteSelect() {
   select.value = app.tool.active ?? "";
   select.hidden = !app.tool.ventes.length;
   $("exportRecap").hidden = !ready;
-  $("exportFoyerRecap").hidden = !ready;
   $("exportCheck").hidden = !app.tool.report.length;
 }
 
 function activateVente(id) {
   const vente = app.tool.ventes.find((item) => item.id === id);
   if (!vente) return;
-  if (app.r5.active) leaveR5();
   app.tool.active = id;
   app.tool.focus = null;
   app.from = { point: vente.point, label: vente.label !== vente.id ? `${vente.id} · ${vente.label}` : vente.id };
@@ -2422,7 +2153,7 @@ function noParkingShown() {
 
 function noParkingNotice() {
   if (noParkingShown()) {
-    toast(`${app.tool.active} n'a pas de parking : pas de calcul en voiture. La carte montre les temps en voiture depuis son adresse, à titre indicatif.`, 8000);
+    toast(`${app.tool.active} n'a pas de parking : pas de calcul en voiture. La carte montre les temps en voiture vers son adresse, à titre indicatif.`, 8000);
   }
 }
 
@@ -2433,34 +2164,6 @@ function leaveTool() {
 
 function toolTimes() {
   return app.tool.active ? app.tool.times.get(`${app.tool.active}|${app.mode}`) ?? null : null;
-}
-
-/** Point de vente choisi en transports en commun, carte partant de lui : la carte vient du calcul porte à porte. */
-function toolTransitShown() {
-  return Boolean(app.tool.active && app.mode === "tc" && heatSource() === app.from && app.tool.grids.get(`${app.tool.active}|tc`));
-}
-
-/**
- * Minutes porte à porte du point de vente choisi vers l'arrivée posée, avec le calcul de ses comptes. Pendant
- * qu'on fait glisser l'arrivée : la valeur de la case de la carte ; au lâcher, le calcul exact (gardé).
- */
-function toolArrivalMinutes() {
-  if (!app.to) return null;
-  if (app.drag?.kind === "marker") {
-    const { cols, times } = app.grid;
-    const [minX, minY, maxX, maxY] = app.data.meta.bounds;
-    const col = Math.floor(((app.to.point[0] - minX) / (maxX - minX)) * cols);
-    const row = Math.floor(((app.to.point[1] - minY) / (maxY - minY)) * app.grid.rows);
-    const value = col >= 0 && row >= 0 && col < cols && row < app.grid.rows ? times[row * cols + col] : NaN;
-    return Number.isFinite(value) ? value : null;
-  }
-  const vente = app.tool.ventes.find((item) => item.id === app.tool.active);
-  const key = `${vente.key}|${placeKey(app.to.point)}`;
-  if (!app.tool.arrival || app.tool.arrival.key !== key) {
-    const [minutes] = app.transit.solve(vente.point, app.transit.prepareTargets([app.to.point]));
-    app.tool.arrival = { key, minutes: Number.isFinite(minutes) ? minutes : null };
-  }
-  return app.tool.arrival.minutes;
 }
 
 /** Tableau des foyers et personnes sous chaque seuil, dans le panneau. */
@@ -2491,14 +2194,14 @@ function toolCountsList(times, thresholds) {
 }
 
 /**
- * Minutes vers chaque foyer (NaN : inaccessible) pour la carte affichée. Point de vente choisi, carte partant de lui :
- * le calcul porte à porte (celui du récapitulatif). Sinon : depuis le départ vert (ou l'arrivée, si la carte part
- * d'elle), refait à chaque déplacement, avec le même calcul que la carte.
+ * Minutes de chaque foyer (NaN : inaccessible) pour la carte affichée. Point de vente choisi : les temps de chaque
+ * foyer vers lui (calcul porte à porte gardé en mémoire). Sinon : depuis le départ (ou l'arrivée) de la carte, refaits
+ * à chaque déplacement avec le même calcul que la carte.
  */
 function foyerTimes() {
   const { foyers } = app.tool;
   if (!foyers.length) return null;
-  const tool = heatSource() === app.from ? toolTimes() : null;
+  const tool = toolTimes();
   if (tool) return tool;
   const key = `${app.heatVersion}|${app.mode}|${foyers.length}`;
   if (app.tool.live?.key === key) return app.tool.live.times;
@@ -2511,7 +2214,6 @@ function foyerTimes() {
 
 /** Minutes vers un point quelconque pour la carte affichée (même calcul qu'elle), ou null si rien n'est calculé. */
 function heatMinutesFn() {
-  if (app.r5.active) return (point) => r5TimeAt(point);
   if (app.mode !== "tc") return app.heatRoad ? (point) => app.roads.minutesTo(app.heatRoad, point) : null;
   return app.heatSolution ? (point) => travelTo(app.heatSolution, point).minutes : null;
 }
@@ -2520,7 +2222,6 @@ function heatMinutesFn() {
 function focusFoyer(index) {
   const foyer = app.tool.foyers[index];
   if (!foyer) return;
-  if (app.r5.active) leaveR5();
   app.to = null;
   app.heatFrom = "from";
   for (const button of $("heatFrom").querySelectorAll("button")) {
@@ -2534,20 +2235,24 @@ function focusFoyer(index) {
 
 const formatPeople = (n) => `${n.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} pers.`;
 
-/** Minutes du départ (le foyer) vers un point, avec le calcul de la carte ; null si rien n'est calculé. */
-function fromMinutesFn() {
-  if (app.mode !== "tc") return app.roadSolution ? (point) => roadMinutesTo(point) : null;
-  return app.solution ? (point) => travelTo(app.solution, point).minutes : null;
-}
-
 const focusKey = () => {
   const foyer = app.tool.foyers[app.tool.focus];
   return foyer ? `${foyer.key}|${app.tool.ventes.map((vente) => vente.key).join(";")}` : null;
 };
 
+/** Minutes du foyer choisi vers un point de vente (NaN : inaccessible), avec le calcul de la carte ; null s'il n'est pas fait. */
+function focusMinutesTo(vente) {
+  if (app.tool.focus === null) return null;
+  if (app.mode === "tc") {
+    const calc = app.tool.focusCalcs.get(focusKey());
+    return calc ? calc.ventes[app.tool.ventes.indexOf(vente)] : null;
+  }
+  return app.roadSolution ? roadMinutesTo(vente.point) ?? NaN : null;
+}
+
 /** Calcul porte à porte du foyer choisi, s'il est fait et que la carte part de lui en transports en commun. */
 function focusTransitCalc() {
-  if (app.tool.focus === null || app.mode !== "tc" || app.r5.active || heatSource() !== app.from) return null;
+  if (app.tool.focus === null || app.mode !== "tc" || heatSource() !== app.from) return null;
   return app.tool.focusCalcs.get(focusKey()) ?? null;
 }
 
@@ -2598,28 +2303,18 @@ function updateFocusPanel() {
     if (className) p.className = className;
     parts.push(p);
   };
-  line(`${R5_MODES[app.mode]} · depuis le foyer ${foyer.id} (${formatPeople(foyer.personnes)})`, "trip-eyebrow");
+  line(`${MODE_TITLES[app.mode]} · depuis le foyer ${foyer.id} (${formatPeople(foyer.personnes)})`, "trip-eyebrow");
   // Transports en commun : calcul porte à porte depuis le foyer ; vélo, voiture : le calcul de la carte, depuis le foyer.
-  let at = null;
-  if (app.mode === "tc") {
-    const calc = app.tool.focusCalcs.get(focusKey());
-    if (calc) {
-      const index = new Map(app.tool.ventes.map((vente, i) => [vente, i]));
-      at = (point, vente) => calc.ventes[index.get(vente)];
-    }
-  } else {
-    const road = fromMinutesFn();
-    if (road) at = (point) => road(point);
-  }
+  const ready = app.mode === "tc" ? app.tool.focusCalcs.has(focusKey()) : Boolean(app.roadSolution);
   if (!app.tool.ventes.length) {
     line("Importez des points de vente pour voir ceux qui sont dans les isochrones de ce foyer.", "r5-source");
-  } else if (!at) {
+  } else if (!ready) {
     line(app.mode === "tc" ? "Calcul porte à porte en cours (horaires TaM, médiane des départs de 7 h à 20 h)…" : "Calcul en cours…", "r5-source");
   } else {
     // En voiture, seuls les points de vente avec parking comptent.
     const usable = app.mode === "voiture" ? app.tool.ventes.filter((vente) => vente.parking) : app.tool.ventes;
     const reached = usable
-      .map((vente) => ({ vente, minutes: at(vente.point, vente) }))
+      .map((vente) => ({ vente, minutes: focusMinutesTo(vente) }))
       .filter((item) => Number.isFinite(item.minutes))
       .sort((a, b) => a.minutes - b.minutes);
     const thresholds = app.isochrones.length ? [...app.isochrones].sort((a, b) => a - b) : [app.maxMinutes];
@@ -2675,34 +2370,37 @@ function updateToolPanel() {
     if (className) p.className = className;
     parts.push(p);
   };
-  const vente = app.tool.ventes.find((item) => item.id === app.tool.active);
-  const doorToDoor = Boolean(vente && heatSource() === app.from);
-  const times = doorToDoor ? toolTimes() : foyerTimes();
+  const vente = activeVente();
+  const toVente = Boolean(vente && toolTimes());
+  const times = foyerTimes();
   line(
-    vente ? `${R5_MODES[app.mode]} · calcul dans la page` : `${R5_MODES[app.mode]} · ${app.tool.foyers.length} foyers importés`,
+    vente ? `${MODE_TITLES[app.mode]} · vers le point de vente ${vente.id}` : `${MODE_TITLES[app.mode]} · ${app.tool.foyers.length} foyers importés`,
     "trip-eyebrow",
   );
   if (noParkingShown()) {
     line(
       `🚗 ${vente.id} n'a pas de parking (colonne parking) : pas de calcul porte à porte en voiture, ni de comptes. ` +
-        "La carte montre les temps en voiture depuis son adresse, à titre indicatif.",
+        "La carte montre les temps en voiture vers son adresse, à titre indicatif.",
       "r5-warning",
     );
   }
   if (!app.tool.foyers.length) {
-    line("Importez des foyers pour les compter dans les isochrones.", "r5-source");
+    line("Importez des foyers pour les compter.", "r5-source");
   } else if (!times) {
     if (!noParkingShown()) line("Calcul en cours…", "r5-source");
   } else {
     const thresholds = app.isochrones.length ? [...app.isochrones].sort((a, b) => a - b) : [app.maxMinutes];
-    line(heatSource() === app.from ? "Foyers dans l'isochrone du départ" : "Foyers dans l'isochrone de l'arrivée", "trip-eyebrow");
+    line(
+      vente ? "Foyers pouvant rejoindre le point de vente" : heatSource() === app.from ? "Foyers dans l'isochrone du départ" : "Foyers dans l'isochrone de l'arrivée",
+      "trip-eyebrow",
+    );
     parts.push(toolCountsList(times, thresholds));
-    if (doorToDoor) {
+    if (toVente) {
       line(
         app.mode === "tc"
-          ? "Du point de vente vers les foyers : marche par les rues et horaires TaM, médiane des départs de 7 h à 20 h " +
+          ? "Du foyer vers le point de vente : marche par les rues et horaires TaM, médiane des départs de 7 h à 20 h " +
               "(méthode de r5py)."
-          : `Du point de vente vers les foyers. ${ROAD_MODES[app.mode].label} : ${ROAD_MODES[app.mode].describe}.`,
+          : `Du foyer vers le point de vente. ${ROAD_MODES[app.mode].label} : ${ROAD_MODES[app.mode].describe}.`,
         "r5-source",
       );
     } else {
@@ -2733,8 +2431,8 @@ function placeAt(screen, kind = "mouse") {
 function drawFoyers() {
   const { foyers, hover, selected } = app.tool;
   if (!foyers.length) return;
-  const times = foyerTimes();
   const focused = app.tool.focus !== null;
+  const times = focused ? null : foyerTimes(); // foyer choisi : les autres sont grisés, leurs temps n'ont pas de sens
   const shown = (i) => hover === `f${i}` || selected.has(`f${i}`);
   const dot = (foyer, i, big) => {
     const [x, y] = project(foyer.point);
@@ -2778,6 +2476,15 @@ function drawVentes() {
   const { ventes, hover, selected } = app.tool;
   if (!ventes.length) return;
   const at = heatMinutesFn();
+  // Temps affiché sur l'étiquette : du foyer choisi vers lui ; sinon du départ de la carte (rien si un point de vente est choisi).
+  const minutesTo = (vente) =>
+    app.mode === "voiture" && !vente.parking
+      ? null
+      : app.tool.focus !== null
+        ? focusMinutesTo(vente)
+        : activeVente()
+          ? null
+          : at?.(vente.point);
   const shown = (i) => hover === `v${i}` || selected.has(`v${i}`);
   const square = (vente, big) => {
     const [x, y] = project(vente.point);
@@ -2803,7 +2510,7 @@ function drawVentes() {
     const drawn = square(vente, true);
     if (!drawn) return;
     const [x, y] = drawn;
-    const minutes = vente.id === app.tool.active && heatSource() === app.from ? null : at?.(vente.point);
+    const minutes = minutesTo(vente);
     const time = minutes === null || minutes === undefined ? null : Number.isFinite(minutes) ? formatMinutes(minutes) : "inaccessible";
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
@@ -2831,11 +2538,14 @@ function downloadCsv(name, header, rows) {
 
 const checkedThresholds = () => {
   const thresholds = [...app.isochrones].sort((a, b) => a - b);
-  if (!thresholds.length) toast("Cochez au moins une isochrone : les récapitulatifs comptent dans les isochrones cochées.", 6000);
+  if (!thresholds.length) toast("Cochez au moins une isochrone : le récapitulatif compte dans les isochrones cochées.", 6000);
   return thresholds;
 };
 
-/** Récapitulatif au départ des points de vente : foyers et personnes dans chaque isochrone de chaque point de vente. */
+/**
+ * Récapitulatif : pour chaque point de vente, mode et isochrone cochée, les foyers et les personnes qui peuvent le
+ * rejoindre dans ce temps (trajet du foyer vers le point de vente).
+ */
 function exportRecap() {
   const { foyers, ventes } = app.tool;
   const thresholds = checkedThresholds();
@@ -2862,38 +2572,8 @@ function exportRecap() {
       }
     }
   }
-  downloadCsv("recapitulatif_points_de_vente.csv",
-    ["point de vente", "adresse", "mode", "isochrone (min)", "foyers", "personnes", "remarque"], rows);
-}
-
-/**
- * Récapitulatif au départ des foyers : pour chaque foyer, mode et isochrone, les points de vente atteints (en voiture,
- * ceux qui ont un parking) et le plus proche. Calcule d'abord ce qui manque (un calcul par foyer en transports en commun).
- */
-async function exportFoyerRecap() {
-  const { foyers, ventes } = app.tool;
-  const thresholds = checkedThresholds();
-  if (!thresholds.length) return;
-  const missing = ventes.some((vente) => toolModes(vente).some((mode) => !app.tool.fromFoyers.has(`${vente.id}|${mode}`)));
-  if (missing && !(await runFoyerTool())) return;
-  const rows = [];
-  foyers.forEach((foyer, i) => {
-    for (const mode of ["tc", "velo", "voiture"]) {
-      const reached = ventes
-        .map((vente) => ({ vente, minutes: app.tool.fromFoyers.get(`${vente.id}|${mode}`)?.[i] }))
-        .filter((item) => Number.isFinite(item.minutes))
-        .sort((a, b) => a.minutes - b.minutes);
-      const nearest = reached[0];
-      for (const threshold of thresholds) {
-        const inside = reached.filter((item) => item.minutes <= threshold);
-        rows.push([foyer.id, foyer.personnes, MODE_LABELS[mode], threshold, inside.length,
-          inside.map((item) => item.vente.id).join(", "), nearest?.vente.id ?? "", nearest ? Math.round(nearest.minutes * 10) / 10 : null]);
-      }
-    }
-  });
-  downloadCsv("recapitulatif_foyers.csv",
-    ["foyer", "personnes", "mode", "isochrone (min)", "points de vente", "liste des points de vente",
-      "point de vente le plus proche", "temps vers le plus proche (min)"], rows);
+  downloadCsv("recapitulatif.csv",
+    ["point de vente", "adresse", "mode", "isochrone (min)", "foyers à cette distance", "personnes", "remarque"], rows);
 }
 
 function exportCheck() {
@@ -2905,7 +2585,8 @@ function exportCheck() {
 }
 
 async function saveMemory() {
-  const entries = await toolDb.entries();
+  // Seuls les temps foyer → point de vente comptent (les anciennes clés point de vente → foyer ne servent plus).
+  const entries = (await toolDb.entries()).filter(([key]) => String(key).includes(`|${TOOL_DIRECTION}|`));
   const blob = new Blob([JSON.stringify({ format: "porte-a-porte-memoire-1", entries })], { type: "application/json" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
@@ -2919,14 +2600,12 @@ async function restoreMemory(file) {
   try {
     const saved = JSON.parse(await file.text());
     if (saved.format !== "porte-a-porte-memoire-1") throw new Error("fichier non reconnu");
-    for (const [key, value] of saved.entries) {
+    for (const [key, value] of saved.entries.filter(([key]) => String(key).includes(`|${TOOL_DIRECTION}|`))) {
       const current = (await toolDb.get(key)) ?? {};
       await toolDb.put(key, { ...value, ...current });
     }
     toast(`${saved.entries.length} calculs restaurés.`);
     app.tool.times.clear();
-    app.tool.grids.clear();
-    app.tool.fromFoyers.clear();
     await runTool();
   } catch (error) {
     toast(`Restauration impossible : ${error.message}`, 7000);
@@ -2977,14 +2656,6 @@ $("venteSelect").addEventListener("change", (event) => {
   }
 });
 $("exportRecap").addEventListener("click", exportRecap);
-$("exportFoyerRecap").addEventListener("click", (event) => {
-  event.currentTarget.disabled = true;
-  exportFoyerRecap()
-    .catch((error) => toast(`Récapitulatif impossible : ${error.message}`, 8000))
-    .finally(() => {
-      $("exportFoyerRecap").disabled = false;
-    });
-});
 $("exportCheck").addEventListener("click", exportCheck);
 $("saveMemory").addEventListener("click", () => saveMemory().catch((error) => toast(`Sauvegarde impossible : ${error.message}`, 7000)));
 $("restoreMemory").addEventListener("change", (event) => {

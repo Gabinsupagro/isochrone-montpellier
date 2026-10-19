@@ -431,7 +431,7 @@ h1 {
   font-size: 0.85rem;
 }
 
-/* --- Résultats r5py --------------------------------------------------------- */
+/* --- Fichiers et choix du point de vente --------------------------------------- */
 
 .file-button {
   position: relative;
@@ -453,7 +453,6 @@ h1 {
   outline-offset: 2px;
 }
 
-#r5Reference,
 #venteSelect,
 #modeSelect {
   max-width: 240px;
