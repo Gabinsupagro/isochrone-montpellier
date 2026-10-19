@@ -19,7 +19,7 @@
     <link rel="icon" href="./favicon-32.png" type="image/png" sizes="32x32" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
 
-    <link rel="stylesheet" href="./styles.css?v=23" />
+    <link rel="stylesheet" href="./styles.css?v=22" />
   </head>
   <body>
 
@@ -30,8 +30,8 @@
         <p class="lede">
           Combien de temps pour rejoindre un lieu de la Métropole&nbsp;? Choisissez un départ et un mode (transports en
           commun, vélo ou voiture)&nbsp;: la carte se colore selon le temps de trajet. Importez vos foyers et vos points de
-          vente pour compter, pour chaque point de vente, les foyers et les personnes qui peuvent le rejoindre en moins
-          de 5, 15, 30 minutes…&nbsp;: tout est calculé dans votre navigateur, vos fichiers ne le quittent pas.
+          vente pour compter, autour de chaque point de vente, les foyers et les personnes à moins de 5, 15, 30
+          minutes…&nbsp;: tout est calculé dans votre navigateur, vos fichiers ne le quittent pas.
         </p>
         <form id="searchForm" class="search" role="search" autocomplete="off">
           <label class="visually-hidden" for="searchInput">Adresse de départ</label>
@@ -51,7 +51,7 @@
           <canvas id="mapCanvas"></canvas>
 
           <aside id="tripPanel" class="trip-panel" aria-live="polite">
-            <p id="tripFromLabel" class="trip-eyebrow">Départ</p>
+            <p class="trip-eyebrow">Départ</p>
             <p id="tripFrom" class="trip-from">Chargement du réseau…</p>
             <div id="tripResult" class="trip-result" hidden>
               <div class="trip-row">
@@ -98,7 +98,7 @@
             <label class="button primary file-button" title="Fichier CSV des points de vente : identifiant, adresse (ou latitude et longitude), type, parking">
               Points de vente…<input id="ventesFile" type="file" accept=".csv,text/csv" />
             </label>
-            <button id="addVenteToggle" type="button" class="button" aria-expanded="false" aria-controls="addVente" title="Ajouter un point de vente à la main : les temps des foyers vers lui sont calculés dans la page">+ Point de vente</button>
+            <button id="addVenteToggle" type="button" class="button" aria-expanded="false" aria-controls="addVente" title="Ajouter un point de vente à la main : ses temps vers les foyers et ses isochrones sont calculés dans la page">+ Point de vente</button>
             <select id="venteSelect" aria-label="Point de vente" hidden></select>
             <!-- Point de vente saisi à la main : géocodé avec la base d'adresses de la page, rien n'est envoyé. -->
             <form id="addVente" class="add-vente" hidden>
@@ -146,7 +146,8 @@
           <!-- Fichiers produits par la page (récapitulatifs, contrôle) et mémoire des calculs : à part de la carte. -->
           <div class="control-group output-group">
             <span class="control-label">Exports et sauvegarde</span>
-            <button id="exportRecap" type="button" class="button" hidden title="Pour chaque point de vente et chaque mode : foyers et personnes qui peuvent le rejoindre dans chaque isochrone cochée">Récap. (CSV)</button>
+            <button id="exportRecap" type="button" class="button" hidden title="Au départ des points de vente : foyers et personnes dans chaque isochrone, pour chaque point de vente et chaque mode">Récap. points de vente (CSV)</button>
+            <button id="exportFoyerRecap" type="button" class="button" hidden title="Au départ des foyers : points de vente atteints dans chaque isochrone et le plus proche, pour chaque foyer et chaque mode (calcul d'un foyer à la fois en transports en commun, à la demande)">Récap. foyers (CSV)</button>
             <button id="exportCheck" type="button" class="button" hidden title="Comment chaque adresse a été placée sur la carte">Contrôle des adresses</button>
             <button id="saveMemory" type="button" class="button" title="Fichier de sauvegarde des temps déjà calculés, à restaurer sur un autre ordinateur ou navigateur">Sauvegarder les calculs</button>
             <label class="button file-button" title="Reprendre une sauvegarde des calculs">
@@ -194,8 +195,8 @@
           calculés restent en mémoire dans ce navigateur&nbsp;:
           en important plus tard des fichiers mis à jour, seuls les nouveaux foyers et points de vente sont calculés.
           «&nbsp;Sauvegarder les calculs&nbsp;» les met dans un fichier, à «&nbsp;Restaurer…&nbsp;» sur un autre ordinateur.
-          «&nbsp;Récap. (CSV)&nbsp;» donne, pour chaque point de vente, chaque mode et chaque isochrone, le nombre de
-          foyers et de personnes qui peuvent le rejoindre&nbsp;; «&nbsp;Contrôle des adresses&nbsp;» dit comment chaque adresse a été placée.
+          «&nbsp;Récapitulatif (CSV)&nbsp;» donne, pour chaque point de vente, chaque mode et chaque isochrone, le nombre de
+          foyers et de personnes&nbsp;; «&nbsp;Contrôle des adresses&nbsp;» dit comment chaque adresse a été placée.
         </p>
         <h2>Comment c'est calculé</h2>
         <p>
@@ -221,13 +222,11 @@
           en vélo et en voiture, les calculs ci-dessus&nbsp;; en transports en commun, marche par les rues jusqu'aux arrêts
           (correspondances à pied jusqu'à 1&nbsp;km, depuis le dernier arrêt jusqu'à 2&nbsp;km), horaires TaM bus compris,
           au moins 1&nbsp;min d'attente à chaque montée, et médiane des temps pour des départs chaque minute de 7&nbsp;h à
-          20&nbsp;h. Écart moyen avec r5py d'environ 1,5&nbsp;min. Tous les trajets vont <strong>d'un foyer vers un point de vente</strong>&nbsp;: en transports en commun, un calcul
-          par foyer (quelques dixièmes de seconde chacun, gardé en mémoire)&nbsp;; en vélo et en voiture, un calcul à
-          rebours depuis chaque point de vente, qui donne le même résultat. Clic sur un foyer&nbsp;: la carte part de lui et
-          liste les points de vente qu'il atteint. Clic sur un point de vente&nbsp;: les foyers sont colorés d'après leur
-          trajet vers lui et comptés&nbsp;; en vélo et en voiture, la carte montre d'où l'on peut le rejoindre&nbsp;; en
-          transports en commun, elle est interpolée entre les foyers (moyenne de ceux à moins de 700&nbsp;m), donc
-          seulement là où il y en a. Les comptes, eux, utilisent le temps exact de chaque foyer.
+          20&nbsp;h. Écart moyen avec r5py d'environ 1,5&nbsp;min. Deux sens de calcul, car avec les horaires l'aller et
+          le retour peuvent différer d'une ou deux minutes&nbsp;: <strong>au départ des points de vente</strong>
+          (isochrones, comptes du panneau, «&nbsp;Récap. points de vente&nbsp;», comme r5py), un calcul par point de
+          vente&nbsp;; <strong>au départ des foyers</strong> (clic sur un foyer, «&nbsp;Récap. foyers&nbsp;»), un calcul
+          par foyer en transports en commun (quelques dixièmes de seconde chacun, fait à la demande et gardé en mémoire).
         </p>
         <p>
           Glissez le marqueur vert pour changer de départ, cliquez n'importe où pour poser une arrivée (glissez-la pour
@@ -280,6 +279,6 @@
     </main>
 
     <div id="toast" class="toast" role="status" hidden></div>
-    <script type="module" src="./app.js?v=55"></script>
+    <script type="module" src="./app.js?v=52"></script>
   </body>
 </html>
