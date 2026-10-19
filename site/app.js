@@ -439,8 +439,13 @@ function computeGrid(solution) {
   return { times, smooth: smoothGrid(bridged, cols, rows), cols, rows, contours: {} };
 }
 
-/** Grille de la carte à partir des minutes par case (voiture, vélo). */
-function roadGrid(minutes) {
+/**
+ * Grille de la carte à partir des minutes par case (voiture, vélo, calcul porte à porte). Les couleurs viennent de la
+ * grille lissée ; le tracé des isochrones, de la grille brute (le lissage 3×3 rétrécissait les contours : des foyers
+ * comptés dans le menu se retrouvaient dehors). `floored` : minutes entières arrondies à l'inférieure (transports en
+ * commun, comme r5py), qui valent en moyenne une demi-minute de moins que le temps réel : le tracé en tient compte.
+ */
+function roadGrid(minutes, { floored = false } = {}) {
   const { cells, meta } = app.data;
   const { gridCols: cols, gridRows: rows } = meta;
   const times = new Float32Array(cols * rows).fill(NaN);
@@ -448,7 +453,8 @@ function roadGrid(minutes) {
     times[cell.row * cols + cell.col] = minutes[index];
   });
   const bridged = fillGaps(times, cols, rows, WATER_BRIDGE_CELLS);
-  return { times, smooth: smoothGrid(bridged, cols, rows), cols, rows, contours: {} };
+  const contour = floored ? bridged.map((value) => value - 0.5) : bridged;
+  return { times, smooth: smoothGrid(bridged, cols, rows), contour, cols, rows, contours: {} };
 }
 
 function ensureRoads() {
@@ -559,7 +565,8 @@ function paintHeat(grid, { fast = false } = {}) {
 
 /** Marching squares sur les centres de cellules ; renvoie des segments en coordonnées monde. */
 function contourSegments(grid, threshold) {
-  const { cols, rows, smooth } = grid;
+  const { cols, rows } = grid;
+  const smooth = grid.contour ?? grid.smooth;
   // Une grille r5py a sa propre emprise ; celle du site, l'emprise des données.
   const [minX, minY, maxX, maxY] = grid.bounds ?? app.data.meta.bounds;
   const cellW = (maxX - minX) / cols;
@@ -1093,7 +1100,7 @@ function recompute({ fast = false } = {}) {
     app.solution = solveFrom(app.from.point);
     app.heatSolution = app.solution;
     app.roadSolution = null;
-    app.grid = roadGrid(focus.grid);
+    app.grid = roadGrid(focus.grid, { floored: true });
     paintHeat(app.grid, { fast });
     updatePanel();
     requestRender();
@@ -1117,7 +1124,7 @@ function recompute({ fast = false } = {}) {
     app.solution = solveFrom(app.from.point);
     app.heatSolution = app.solution;
     app.roadSolution = null;
-    app.grid = roadGrid(toolGrid);
+    app.grid = roadGrid(toolGrid, { floored: true });
     paintHeat(app.grid, { fast });
     updatePanel();
     requestRender();
