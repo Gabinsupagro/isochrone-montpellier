@@ -1313,10 +1313,12 @@ function legendDescription() {
       : focus
         ? `du foyer ${focus.id}`
         : "du départ";
+  // Destinations : les foyers depuis un point de vente, les points de vente depuis un foyer, sinon n'importe quel lieu.
+  const target = fromArrival ? "chaque lieu" : vente ? "chaque foyer" : focus ? "chaque point de vente" : "chaque lieu";
   if (app.mode === "tc") {
     const exact = !fromArrival && (vente || focus) && (vente ? Boolean(app.tool.grids.get(`${vente.id}|tc`)) : Boolean(focusTransitCalc()));
     return {
-      title: `Temps en ${mode}, ${origin} vers chaque lieu`,
+      title: `Temps en ${mode}, ${origin} vers ${target}`,
       note: exact
         ? "Calcul porte à porte (méthode de r5py) : marche par les rues, horaires TaM, médiane des départs de 7 h à 20 h, " +
           "attente comprise. Le sens compte : l'aller et le retour peuvent différer d'une ou deux minutes."
@@ -1326,7 +1328,7 @@ function legendDescription() {
   }
   const road = ROAD_MODES[app.mode];
   return {
-    title: fromArrival ? `Temps en ${mode}, de chaque lieu vers l'arrivée` : `Temps en ${mode}, ${origin} vers chaque lieu`,
+    title: fromArrival ? `Temps en ${mode}, de chaque lieu vers l'arrivée` : `Temps en ${mode}, ${origin} vers ${target}`,
     note: fromArrival ? "Chaque lieu est pris comme départ vers l'arrivée : sens uniques pris à rebours." : "",
   };
 }
