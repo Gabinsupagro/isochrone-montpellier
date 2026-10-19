@@ -225,8 +225,9 @@
           par foyer (quelques dixièmes de seconde chacun, gardé en mémoire)&nbsp;; en vélo et en voiture, un calcul à
           rebours depuis chaque point de vente, qui donne le même résultat. Clic sur un foyer&nbsp;: la carte part de lui et
           liste les points de vente qu'il atteint. Clic sur un point de vente&nbsp;: les foyers sont colorés d'après leur
-          trajet vers lui et comptés&nbsp;; en vélo et en voiture, la carte montre aussi d'où l'on peut le rejoindre
-          (pas d'isochrone autour d'un point de vente en transports en commun).
+          trajet vers lui et comptés&nbsp;; en vélo et en voiture, la carte montre d'où l'on peut le rejoindre&nbsp;; en
+          transports en commun, elle est interpolée entre les foyers (moyenne de ceux à moins de 700&nbsp;m), donc
+          seulement là où il y en a. Les comptes, eux, utilisent le temps exact de chaque foyer.
         </p>
         <p>
           Glissez le marqueur vert pour changer de départ, cliquez n'importe où pour poser une arrivée (glissez-la pour
@@ -279,6 +280,6 @@
     </main>
 
     <div id="toast" class="toast" role="status" hidden></div>
-    <script type="module" src="./app.js?v=54"></script>
+    <script type="module" src="./app.js?v=55"></script>
   </body>
 </html>

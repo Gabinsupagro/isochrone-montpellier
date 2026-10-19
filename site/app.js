@@ -1091,12 +1091,14 @@ function recompute({ fast = false } = {}) {
     return;
   }
   if (vente && app.mode === "tc") {
-    // Point de vente choisi, transports en commun : pas d'isochrone autour de lui (les trajets se calculent du foyer
-    // vers le point de vente) ; les foyers sont colorés d'après leur trajet, le panneau les compte.
+    // Point de vente choisi, transports en commun : les trajets se calculent du foyer vers le point de vente ; la carte
+    // en est tirée par interpolation entre les foyers (vide tant que ces temps ne sont pas calculés).
     app.solution = null;
     app.heatSolution = null;
     app.roadSolution = null;
-    app.grid = null;
+    const times = toolTimes();
+    app.grid = times ? roadGrid(interpolateFoyers(times)) : null;
+    if (app.grid) paintHeat(app.grid, { fast });
     updatePanel();
     requestRender();
     return;
@@ -1277,8 +1279,8 @@ function legendDescription() {
     return app.mode === "tc"
       ? {
           title: `Temps en ${mode}, de chaque foyer vers le point de vente ${vente.id}`,
-          note: `${doorToDoor} Pas d'isochrone autour d'un point de vente en transports en commun : chaque foyer est coloré ` +
-            "d'après son propre trajet vers lui.",
+          note: `${doorToDoor} La carte est interpolée entre les foyers (moyenne des foyers à moins de ${INTERPOLATION_RADIUS} m) : ` +
+            "elle n'existe que là où il y a des foyers, et le comptage exact est celui du panneau.",
         }
       : {
           title: `Temps en ${mode}, de chaque lieu vers le point de vente ${vente.id}`,
@@ -2021,6 +2023,7 @@ async function runTool({ only = null } = {}) {
     fillVenteSelect();
     updatePanel();
     requestRender();
+    if (app.tool.active && app.mode === "tc") recompute(); // la carte du point de vente vient de ces temps
     if (app.tool.focus !== null && app.mode === "tc") ensureFocusCalc(); // attendait la fin de ce calcul
   }
   return done;
@@ -2191,6 +2194,32 @@ function toolCountsList(times, thresholds) {
     list.append(item);
   }
   return list;
+}
+
+/**
+ * Temps de chaque case de la carte vers le point de vente, déduits de ceux des foyers : moyenne des foyers à moins de
+ * INTERPOLATION_RADIUS mètres, pondérée par l'inverse du carré de la distance. Sans foyer à proximité : pas de valeur.
+ */
+const INTERPOLATION_RADIUS = 700;
+function interpolateFoyers(times) {
+  const { foyers } = app.tool;
+  const known = [];
+  foyers.forEach((foyer, i) => {
+    if (Number.isFinite(times[i])) known.push([foyer.point[0], foyer.point[1], times[i]]);
+  });
+  const radius2 = INTERPOLATION_RADIUS ** 2;
+  return Float32Array.from(app.data.cells, (cell) => {
+    let sum = 0;
+    let weights = 0;
+    for (const [x, y, minutes] of known) {
+      const d2 = (x - cell.point[0]) ** 2 + (y - cell.point[1]) ** 2;
+      if (d2 > radius2) continue;
+      const weight = 1 / (d2 + 2500); // 50 m : une case contenant un foyer prend presque son temps
+      sum += weight * minutes;
+      weights += weight;
+    }
+    return weights ? sum / weights : NaN;
+  });
 }
 
 /**

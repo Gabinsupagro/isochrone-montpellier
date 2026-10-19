@@ -27,8 +27,9 @@ Ouvrir la page (en local : voir « Lancer » ; en ligne : l'adresse GitHub Pages
    a un parking) : en transports en commun, un calcul par foyer (quelques dixièmes de seconde chacun, gardés en
    mémoire du navigateur) ; en vélo et en voiture, un calcul à rebours depuis chaque point de vente (même résultat). Un
    clic sur un foyer montre ses isochrones et les points de vente qu'il atteint ; un clic sur un point de vente colore
-   et compte les foyers d'après leur trajet vers lui (en vélo et en voiture, la carte montre aussi d'où l'on peut le
-   rejoindre ; pas d'isochrone autour d'un point de vente en transports en commun) ;
+   et compte les foyers d'après leur trajet vers lui (en vélo et en voiture, la carte montre d'où l'on peut le
+   rejoindre ; en transports en commun, elle est interpolée entre les foyers à moins de 700 m, donc seulement là où il
+   y en a) ;
 4. « Récap. (CSV) » : pour chaque point de vente, mode et isochrone cochée (5, 15, 30, 60 min, et toute valeur ajoutée
    avec « Autre », de 1 à 90 min), les foyers et les personnes qui peuvent le rejoindre dans ce temps ;
    « Contrôle des adresses » : comment chaque adresse a été placée (et celles non trouvées).
