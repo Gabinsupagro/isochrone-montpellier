@@ -1199,6 +1199,7 @@ function setHeatFrom(source) {
 
 function updatePanel() {
   $("tripFrom").textContent = app.from?.label ?? "—";
+  updateLegendInfo();
   const foyersShown = app.tool.foyers.length > 0 || Boolean(app.tool.active);
   $("r5Info").hidden = !app.r5.active && !foyersShown;
   if (foyersShown && !app.r5.active) updateToolPanel(); // comptes de foyers, sous l'itinéraire habituel
@@ -1299,12 +1300,115 @@ function contrastText(hex) {
   return luminance > 150 ? "#111" : "#fff";
 }
 
+/** Sens du trajet et nature du calcul de la carte affichée, en une phrase et une note. */
+function legendDescription() {
+  const vente = activeVente();
+  const focus = app.tool.focus !== null ? app.tool.foyers[app.tool.focus] : null;
+  const fromArrival = heatSource() !== app.from; // carte « depuis l'arrivée »
+  const mode = MODE_LABELS[app.mode];
+  const origin = fromArrival
+    ? "de l'arrivée"
+    : vente
+      ? `du point de vente ${vente.id}`
+      : focus
+        ? `du foyer ${focus.id}`
+        : "du départ";
+  if (app.mode === "tc") {
+    const exact = !fromArrival && (vente || focus) && (vente ? Boolean(app.tool.grids.get(`${vente.id}|tc`)) : Boolean(focusTransitCalc()));
+    return {
+      title: `Temps en ${mode}, ${origin} vers chaque lieu`,
+      note: exact
+        ? "Calcul porte à porte (méthode de r5py) : marche par les rues, horaires TaM, médiane des départs de 7 h à 20 h, " +
+          "attente comprise. Le sens compte : l'aller et le retour peuvent différer d'une ou deux minutes."
+        : "Calcul rapide : attente égale à la moitié de l'intervalle entre deux passages, marche à vol d'oiseau jusqu'aux arrêts. " +
+          (fromArrival ? "Carte calculée dans le sens arrivée → lieux, comme depuis un départ." : "Sens départ → lieux."),
+    };
+  }
+  const road = ROAD_MODES[app.mode];
+  return {
+    title: fromArrival ? `Temps en ${mode}, de chaque lieu vers l'arrivée` : `Temps en ${mode}, ${origin} vers chaque lieu`,
+    note: fromArrival ? "Chaque lieu est pris comme départ vers l'arrivée : sens uniques pris à rebours." : "",
+  };
+}
+
+function legendKey(draw, text) {
+  const item = document.createElement("li");
+  const key = document.createElement("span");
+  key.className = "key";
+  key.append(draw);
+  const label = document.createElement("span");
+  label.textContent = text;
+  item.append(key, label);
+  return item;
+}
+
+function legendShape(kind, fill, stroke = "#111", size = 14) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("width", String(size));
+  svg.setAttribute("height", String(size));
+  svg.setAttribute("viewBox", "0 0 14 14");
+  svg.setAttribute("aria-hidden", "true");
+  let shape;
+  if (kind === "line") {
+    shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    shape.setAttribute("d", "M1 10 C 4 2, 9 12, 13 4");
+    shape.setAttribute("fill", "none");
+    shape.setAttribute("stroke-width", "1.8");
+  } else if (kind === "square") {
+    shape = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    for (const [name, value] of [["x", 2], ["y", 2], ["width", 10], ["height", 10]]) shape.setAttribute(name, String(value));
+    shape.setAttribute("stroke-width", "1.6");
+  } else {
+    shape = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    for (const [name, value] of [["cx", 7], ["cy", 7], ["r", 4.6]]) shape.setAttribute(name, String(value));
+    shape.setAttribute("stroke-width", "1.6");
+  }
+  shape.setAttribute("fill", kind === "line" ? "none" : fill);
+  shape.setAttribute("stroke", stroke);
+  svg.append(shape);
+  return svg;
+}
+
+/** Aide à l'interprétation : sens du trajet, couleurs et symboles utiles pour ce qui est affiché. */
+function updateLegendInfo() {
+  const { title, note } = legendDescription();
+  $("legendDirection").textContent = title;
+  $("legendNote").textContent = note;
+  const [r, g, b] = paletteColor(0.3);
+  const near = `rgb(${r}, ${g}, ${b})`;
+  const keys = [];
+  const vente = activeVente();
+  const focus = app.tool.focus !== null;
+  keys.push(
+    vente
+      ? legendKey(legendShape("square", COLORS.from, "#fff"), `Point de vente choisi : ${vente.id} (départ de la carte)`)
+      : focus
+        ? legendKey(legendShape("circle", COLORS.from, "#fff"), `Foyer choisi : ${app.tool.foyers[app.tool.focus].id} (départ de la carte)`)
+        : legendKey(legendShape("circle", COLORS.from, "#fff"), "Départ (glissez-le pour le déplacer)"),
+  );
+  if (app.to) keys.push(legendKey(legendShape("circle", COLORS.to, "#fff"), "Arrivée (double-clic pour la retirer)"));
+  if (app.isochrones.length) {
+    keys.push(legendKey(legendShape("line", "none", COLORS.contour), `Trait noir : isochrone (${[...app.isochrones].sort((a, c) => a - c).join(", ")} min)`));
+  }
+  if (app.tool.foyers.length) {
+    keys.push(legendKey(legendShape("circle", near), "Foyer : couleur = temps jusqu'à lui (gris = au-delà de l'échelle)"));
+    if (focus) keys.push(legendKey(legendShape("circle", "rgba(150,150,150,0.35)", "rgba(40,40,40,0.3)"), "Autres foyers, grisés quand un foyer est choisi"));
+  }
+  if (app.tool.ventes.length) {
+    const car = app.mode === "voiture";
+    keys.push(legendKey(legendShape("square", "#6b3fa0", "#fff"), "Point de vente"));
+    if (car) keys.push(legendKey(legendShape("square", "#b4b4b4", "#fff"), "Point de vente sans parking (non calculé en voiture)"));
+  }
+  $("legendKeys").replaceChildren(...keys);
+}
+
 function updateLegend() {
   const stops = PALETTE.map(([t, [r, g, b]]) => `rgb(${r}, ${g}, ${b}) ${Math.round(t * 100)}%`);
   $("legendBar").style.background = `linear-gradient(90deg, ${stops.join(", ")})`;
   $("legendMid").textContent = `${Math.round(app.maxMinutes / 2)} min`;
   $("legendMax").textContent = `${app.maxMinutes} min`;
   $("maxValue").textContent = `${app.maxMinutes} min`;
+  updateLegendInfo();
 }
 
 function formatPair(point) {
@@ -1367,6 +1471,7 @@ function restoreFromUrl() {
   $("networkToggle").checked = app.showNetwork;
   syncOpacityControl();
   updateLegend();
+  if (window.matchMedia("(max-width: 720px)").matches) $("legend").open = false; // sur téléphone : repliée au départ
 
   const from = parsePair(params.get("from"));
   if (!from || !setFrom(from, null, { quiet: true })) {
