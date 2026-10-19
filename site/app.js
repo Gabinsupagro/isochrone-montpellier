@@ -1400,8 +1400,8 @@ function updateLegendInfo() {
     const car = app.mode === "voiture";
     keys.push(
       focus
-        ? legendKey(legendShape("square", near), "Point de vente : couleur = temps depuis le foyer choisi (gris = au-delà de l'échelle)")
-        : legendKey(legendShape("square", "#6b3fa0", "#fff"), "Point de vente"),
+        ? legendKey(legendShape("square", near, "#fff"), "Point de vente : couleur = temps depuis le foyer choisi (gris = au-delà de l'échelle)")
+        : legendKey(legendShape("square", near, "#fff"), "Point de vente : couleur = temps jusqu'à lui (gris = au-delà de l'échelle)"),
     );
     if (car) keys.push(legendKey(legendShape("square", "#b4b4b4", "#fff"), "Point de vente sans parking (non calculé en voiture)"));
   }
@@ -2799,13 +2799,14 @@ function drawVentes() {
     const half = big ? 6.5 : 4.5;
     ctx.beginPath();
     ctx.rect(x - half, y - half, half * 2, half * 2);
-    // En voiture, les points de vente sans parking sont grisés (pas de calcul en voiture pour eux). Foyer choisi : couleur
-    // du temps du foyer vers le point de vente, comme les foyers (gris : au-delà de l'échelle ou inaccessible).
+    // En voiture, les points de vente sans parking sont grisés (pas de calcul en voiture pour eux). Sinon, couleur du
+    // temps jusqu'à lui, comme les foyers : depuis le foyer choisi, ou depuis le départ de la carte (gris : au-delà de
+    // l'échelle ou inaccessible ; violet : pas de carte calculée).
     let fill = vente.id === app.tool.active ? "#2f9e1f" : "#6b3fa0";
     if (app.mode === "voiture" && !vente.parking) fill = "#b4b4b4";
-    else if (app.tool.focus !== null) {
-      const time = focusMinutesTo(vente);
-      if (time !== null) {
+    else if (vente.id !== app.tool.active) {
+      const time = app.tool.focus !== null ? focusMinutesTo(vente) : at?.(vente.point);
+      if (time !== null && time !== undefined) {
         const [r, g, b] = Number.isFinite(time) && time <= app.maxMinutes ? paletteColor(time / app.maxMinutes) : [150, 150, 150];
         fill = `rgb(${r}, ${g}, ${b})`;
       }
