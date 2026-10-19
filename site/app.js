@@ -1398,7 +1398,11 @@ function updateLegendInfo() {
   }
   if (app.tool.ventes.length) {
     const car = app.mode === "voiture";
-    keys.push(legendKey(legendShape("square", "#6b3fa0", "#fff"), "Point de vente"));
+    keys.push(
+      focus
+        ? legendKey(legendShape("square", near), "Point de vente : couleur = temps depuis le foyer choisi (gris = au-delà de l'échelle)")
+        : legendKey(legendShape("square", "#6b3fa0", "#fff"), "Point de vente"),
+    );
     if (car) keys.push(legendKey(legendShape("square", "#b4b4b4", "#fff"), "Point de vente sans parking (non calculé en voiture)"));
   }
   $("legendKeys").replaceChildren(...keys);
@@ -2545,6 +2549,16 @@ const focusKey = () => {
   return foyer ? `${foyer.key}|${app.tool.ventes.map((vente) => vente.key).join(";")}` : null;
 };
 
+/** Minutes du foyer choisi vers un point de vente (NaN : inaccessible), avec le calcul de la carte ; null s'il n'est pas fait. */
+function focusMinutesTo(vente) {
+  if (app.tool.focus === null) return null;
+  if (app.mode === "tc") {
+    const calc = app.tool.focusCalcs.get(focusKey());
+    return calc ? calc.ventes[app.tool.ventes.indexOf(vente)] : null;
+  }
+  return app.roadSolution ? roadMinutesTo(vente.point) ?? NaN : null;
+}
+
 /** Calcul porte à porte du foyer choisi, s'il est fait et que la carte part de lui en transports en commun. */
 function focusTransitCalc() {
   if (app.tool.focus === null || app.mode !== "tc" || app.r5.active || heatSource() !== app.from) return null;
@@ -2785,8 +2799,18 @@ function drawVentes() {
     const half = big ? 6.5 : 4.5;
     ctx.beginPath();
     ctx.rect(x - half, y - half, half * 2, half * 2);
-    // En voiture, les points de vente sans parking sont grisés (pas de calcul en voiture pour eux).
-    ctx.fillStyle = app.mode === "voiture" && !vente.parking ? "#b4b4b4" : vente.id === app.tool.active ? "#2f9e1f" : "#6b3fa0";
+    // En voiture, les points de vente sans parking sont grisés (pas de calcul en voiture pour eux). Foyer choisi : couleur
+    // du temps du foyer vers le point de vente, comme les foyers (gris : au-delà de l'échelle ou inaccessible).
+    let fill = vente.id === app.tool.active ? "#2f9e1f" : "#6b3fa0";
+    if (app.mode === "voiture" && !vente.parking) fill = "#b4b4b4";
+    else if (app.tool.focus !== null) {
+      const time = focusMinutesTo(vente);
+      if (time !== null) {
+        const [r, g, b] = Number.isFinite(time) && time <= app.maxMinutes ? paletteColor(time / app.maxMinutes) : [150, 150, 150];
+        fill = `rgb(${r}, ${g}, ${b})`;
+      }
+    }
+    ctx.fillStyle = fill;
     ctx.fill();
     ctx.lineWidth = big ? 2.2 : 1.6;
     ctx.strokeStyle = "#fff";
@@ -2803,7 +2827,7 @@ function drawVentes() {
     const drawn = square(vente, true);
     if (!drawn) return;
     const [x, y] = drawn;
-    const minutes = vente.id === app.tool.active && heatSource() === app.from ? null : at?.(vente.point);
+    const minutes = app.tool.focus !== null ? focusMinutesTo(vente) : vente.id === app.tool.active && heatSource() === app.from ? null : at?.(vente.point);
     const time = minutes === null || minutes === undefined ? null : Number.isFinite(minutes) ? formatMinutes(minutes) : "inaccessible";
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
