@@ -49,16 +49,6 @@ montée, 8 véhicules au plus, départs chaque minute de 7 h à 20 h et médiane
 2 500 trajets tirés au hasard : écart moyen de 1,4 min en valeur absolue, 90 % des écarts sous 3 min, à peine plus
 lent (+0,4 min en moyenne). Environ 1 s par point de vente pour 10 000 destinations.
 
-## Lancer
-
-```bash
-python3 fetch_data.py   # facultatif : retélécharge les sources dans data/
-python3 build_data.py   # régénère site/data/commute_map_data.json
-python3 -m http.server 8000 --directory site
-```
-
-Puis ouvrir [http://localhost:8000](http://localhost:8000).
-
 ## Données
 
 - GTFS théorique du réseau TaM ([transport.data.gouv.fr](https://transport.data.gouv.fr/datasets/reseau-urbain-tam))
